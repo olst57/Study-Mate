@@ -12,7 +12,7 @@
    它要一份真宿主安装（`STUDYMATE_DSH_PACKAGE`，与 `test:dsh` 同一个环境变量），所以
    不进默认门禁、也不进 CI（CI 没有宿主包）。没设这个变量时整份跳过。
 
-   四件事，缺一不可：
+   五件事，缺一不可：
 
      1. **扫**：`registerStudyMate` 的十五个原生工具 + 答疑预设那条插件行注册的只读工具，
         逐个把 `parameters` 与 `output.schema` 交给宿主的 `assertSupportedJsonSchema`；
@@ -26,6 +26,10 @@
         `dsh-tool-subagent-control/list-agents`，见 #244），硬挂着的行会让**整条预设**
         被判 broken。这里用宿主安装根上的 `createRequire().resolve` 逐行解析；解析不到的
         必须带停用条件、并且按宿主的方式求值为 true。
+     5. **阅读端的槽位形状**：`lib/client.js` 往 `main` / `sidebar.panellist` 注册的那两项，
+        必填注册项（`main` 的 `key`、`sidebar.panellist` 的 `id`）由宿主的槽位契约目录定
+        （`dsh-cordis-client-runner/lib/client.js`）。这里读那份目录，按 `kind` 与
+        `registerOptions` 里的 `required` 逐项对；同时解析 `dsh.client.inject` 的六个包。
    ───────────────────────────────────────────────────────────────────────── */
 
 import assert from 'node:assert/strict';
@@ -36,6 +40,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { parseYaml } from '../../lib/yaml.ts';
+import { loadClient } from './fixtures/client_harness.mjs';
 import { fakeContext, loadTools } from './fixtures/tools.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -254,4 +259,87 @@ test('宿主契约：预设里每一行的模块都解析得到，解析不到�
     }
   }
   assert.deepEqual(problems, []);
+});
+/* ── 五条：阅读端的槽位形状由宿主自己的契约目录定 ──────────────────────────────
+
+   阅读端（lib/client.js）往宿主注册两处：main（keyed/root，key 是侧栏那一行的 id）与
+   sidebar.panellist（list/root，侧栏图标那一格）。这两处的必填项不是我们说了算：宿主把
+   **每个槽位的契约**打包成一份目录，住在 dsh-cordis-client-runner/lib/client.js 里
+   （全宿主唯一出现 registerOptions 的文件）。条目形状：
+
+     {key:`main`, kind:`keyed`, scope:`root`,
+      registerOptions:[{name:`key`, requirement:`required`, type:`string`, …}]}
+
+   宿主升级后若改了槽位名、改了 kind（比如 main 从 keyed 变成 single），或者给某个槽位加了
+   必填项，这里先红——红的意思是「先读宿主那份目录，再改我们在 client.js 里的注册」，
+   不是「去改这份检查」。 */
+function hostSlotContract(catalog, slot) {
+  const at = catalog.indexOf(`key:\`${slot}\``);
+  if (at < 0) return null;
+  // 一条条目里的注册项到 ownerProps 为止（后头是宿主给组件的 props 说明，不是一个东西）。
+  const body = catalog.slice(at, at + 3000);
+  const cut = body.indexOf('ownerProps:');
+  const head = cut < 0 ? body : body.slice(0, cut);
+  const kind = /kind:\s*`([^`]+)`/.exec(head)?.[1] ?? null;
+  const required = [...head.matchAll(/name:\s*`([^`]+)`,\s*requirement:\s*`([^`]+)`/g)]
+    .filter(([, , requirement]) => requirement === 'required')
+    .map(([, name]) => name);
+  return { kind, required };
+}
+
+test('宿主契约：阅读端注册的槽位仍由宿主声明，必填注册项一个不少', async t => {
+  if (!requireRuntime(t)) return;
+
+  const modulePath = hostModule(runtime, path.join('dsh-cordis-client-runner', 'lib', 'client.js'));
+  if (modulePath === null) {
+    t.skip(`这份宿主安装里找不到 dsh-cordis-client-runner（${runtime}）：跳过阅读端槽位检查`);
+    return;
+  }
+  const catalog = fs.readFileSync(modulePath, 'utf8');
+
+  // dsh.client.inject 那六个包：宿主升级时删/并掉一个，客户端就只剩半套服务。
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const injected = manifest.dsh?.client?.inject ?? [];
+  assert.ok(injected.length >= 6, `package.json 的 dsh.client.inject 应该至少六项，实际 ${injected.length} 项`);
+  const hostRequire = createRequire(path.join(runtime, 'package.json'));
+  const unresolved = injected.filter(name => {
+    try { hostRequire.resolve(name); return false; } catch { return true; }
+  });
+  assert.deepEqual(unresolved, [],
+    `dsh.client.inject 里这些包在这个宿主上解析不到：${unresolved.join('、')}——`
+    + '宿主可能合并/改名了客户端模块，先读新版宿主再改 package.json');
+
+  // 走一遍 apply，只接住 slots.register 的那两次调用。
+  const registrations = [];
+  const { plugin } = loadClient();
+  plugin.apply({
+    get: () => null,
+    slots: {
+      inject: (name, factory) => { factory(); return () => {}; },
+      register: (config, component) => { registrations.push({ config, component }); return () => {}; },
+    },
+    effect: (register) => { register(); return () => {}; },
+  });
+
+  const names = registrations.map(({ config }) => config.name).sort();
+  assert.deepEqual(names, ['main', 'sidebar.panellist'],
+    `阅读端应该只往 main 与 sidebar.panellist 注册（宿主忽略了别的槽位），实际：${names.join('、')}`);
+
+  // 反证：随便编一个槽位名，目录里必须找不到——否则下面的对照就是空转。
+  assert.equal(hostSlotContract(catalog, 'studymate.no-such-slot'), null,
+    '宿主目录里居然有 studymate.no-such-slot：说明这条查的不是契约目录，先修这条检查');
+
+  const problems = [];
+  for (const { config } of registrations) {
+    const contract = hostSlotContract(catalog, config.name);
+    if (contract === null) {
+      problems.push(`${config.name}: 宿主槽位契约目录里没有这一项（宿主可能改名了）`);
+      continue;
+    }
+    const missing = contract.required.filter(option => !(option in config));
+    if (missing.length > 0) {
+      problems.push(`${config.name}（宿主声明 kind=${contract.kind}）缺必填注册项：${missing.join('、')}`);
+    }
+  }
+  assert.deepEqual(problems, [], `阅读端的槽位注册与宿主契约对不上：\n${problems.join('\n')}`);
 });
