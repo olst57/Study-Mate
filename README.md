@@ -31,7 +31,7 @@
 
 ### DeepSeek Harness
 
-**DSH 依赖**：DSH 0.1.7-alpha.1+
+**DSH 依赖**：DSH 0.1.7-alpha.1+；`v2.0.4` 已在 DSH 0.2.2-rc.3 上验过。版本口径只写一处，见[安装与更新](docs/使用/安装.md)
 #### 安装
 
 - web端
