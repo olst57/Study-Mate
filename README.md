@@ -105,7 +105,7 @@ StudyMate 是一套**数学/计算机学习工作流、SKILL 与 DSH 插件**，
 
 <img src="docs/images/preview-index.png" width="640" alt="路线图示例">
 
-**课件是学习的主载体**：经典教材的讲解风格，丰富的配图，定制化的题目与项目目标。
+**课件是学习的主载体**：有人格、有故事钩子的讲解风格，丰富的配图，定制化的题目与项目目标。
 
 <img src="docs/images/preview-lesson.png" width="640" alt="课件示例">
 
