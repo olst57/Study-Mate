@@ -11,7 +11,7 @@ user-invocable: false
 
 把当前节点讲成一节课。题目不归你——题面、答案、判分要点、「实操任务」全由 `practice-evaluator` 出（规范见 `layered-practice`），你只写内容、留题目位置，**lab 的内容不抄进课件、课件只指向它**。
 
-**开始写前先加载 `lesson-design`**——课件内核（着眼点、贯穿线索、块表）的唯一约束来源；块的写法与指令语法见 `<root>/docs/规范/课件内容格式.md`（别处不抄第二份）。**配图规范的唯一 owner 是本文件的「配图」**。
+**开始写前先加载 `lesson-design`**——课件内核（着眼点、贯穿线索、块表）与「五、讲课人格与文风」（人格与文风的唯一约束来源）；块的写法与指令语法见 `<root>/docs/规范/课件内容格式.md`（别处不抄第二份）。**配图规范的唯一 owner 是本文件的「配图」**。
 
 **题目位置块的字段契约看 schema**：唯一出处是 `<root>/schemas/question.schema.json`（层级词表与「服务哪一层」见 `lib/core/rules.ts` 的 `QUESTION_KIND_SHAPES`）；`:::` 指令与块的写法见 `<root>/docs/规范/课件内容格式.md`。**读 schema 与核心纯函数是规范指定的工序**，别去读阅读端源码反推约定——那算**规格 bug**，报给总控。
 
