@@ -59,7 +59,7 @@ const skills = new Map([
   ['lesson-design', {
     description: 'StudyMate 课件设计内部规范：供学习总控和讲解角色读取，规定课件结构、内容块、行文与配图要求；不承担用户的独立设计任务。',
     display_name: 'StudyMate · 课件规范',
-    short_description: '供学习总控和讲解角色使用，统一课件结构、内容块与教材式行文',
+    short_description: '供学习总控和讲解角色使用，统一课件结构、内容块与讲课人格文风',
     default_prompt: '请用 $lesson-design 的内部规范检查当前 StudyMate 课件的内容设计。',
   }],
   ['layered-practice', {

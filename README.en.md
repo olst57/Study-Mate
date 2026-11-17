@@ -33,7 +33,7 @@ I don't think that does justice to all the trust and stars it has received. I'm 
 
 ### DeepSeek Harness
 
-**DSH requirements**: DSH 0.1.7-alpha.1+, Node.js (see `engines` in `package.json` for supported versions), and `pnpm` on PATH (`dsh plugin` forwards to pnpm). **Python is not required**: the engine is a TypeScript plugin that ships with the package.
+**DSH requirements**: DSH 0.1.7-alpha.1+ (`v2.0.4` has been verified on DSH 0.2.2-rc.3; the version policy lives in the [installation guide](docs/使用/安装.md)), Node.js (see `engines` in `package.json` for supported versions), and `pnpm` on PATH (`dsh plugin` forwards to pnpm). **Python is not required**: the engine is a TypeScript plugin that ships with the package.
 
 ```bash
 dsh plugin --profile web add @yunmiao/studymate
