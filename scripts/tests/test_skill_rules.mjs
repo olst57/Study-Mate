@@ -1074,12 +1074,13 @@ const knobNumbers = texts => {
 
 test('数字旋钮守恒：单元学时 − 题量上限 = 常规课路线（20 − 6 = 14）', () => {
   const { unit, quiz, route } = knobNumbers(SKILL_TEXT);
-  assert.ok(unit && quiz && route,
-    `三处数字旋钮至少有一处读不出来（口径被改写或措辞变了）：unit=${unit} quiz=${quiz} route=${route}`);
+  assert.ok(Number.isFinite(unit) && Number.isFinite(quiz) && Number.isFinite(route),
+    `三处数字旋钮必须全部解析为有限数字（口径被改写或措辞变了）：unit=${unit} quiz=${quiz} route=${route}`);
   assert.equal(unit - quiz, route, `单元学时 ${unit} 减去题量上限 ${quiz} 应等于常规课路线 ${route}`);
   // 机制自检（合成数据）：派生值对不上时必须报出来，否则这条只是没人跑过的声明。
   const drifted = new Map(SKILL_TEXT).set('lesson-design',
     SKILL_TEXT.get('lesson-design').replace('约 14 分钟 · 三步', '约 15 分钟 · 三步'));
   const bumped = knobNumbers(drifted);
+  assert.equal(bumped.route, 15, '合成数据替换未命中 lesson-design 路线数字');
   assert.notEqual(bumped.unit - bumped.quiz, bumped.route, '守恒断言没有真的比较派生值');
 });
