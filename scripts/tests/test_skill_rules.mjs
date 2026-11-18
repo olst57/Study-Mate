@@ -454,6 +454,9 @@ const RULES = {
     ['lab 判分契约按 layered-practice 第六节（正文不在本角色规格里）', '按 `layered-practice` 第六节'],
     // #197：出题角色造 lab 不再从零设计判分机制——从骨架起、只填题目与断言。
     ['造 lab 从骨架起、只填题目与断言', '从 `<root>/templates/lab/` 的骨架起，只填题目与断言'],
+    // PR 4：出题/评审角色造 lab 与实验验收任务同样要求起点可运行、单步 5 分钟内见结果。
+    ['实操 lab 起点必须能跑', '**起点必须能跑**'],
+    ['实操 lab 每一步只改一处、5 分钟内见结果', '**每一步只改一处**，改完 5 分钟内能看到结果'],
   ],
   'resource-scout': [
     ['staged 资源清单写 handoff manifest', 'handoff.json'],
