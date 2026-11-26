@@ -26,10 +26,10 @@
         `dsh-tool-subagent-control/list-agents`，见 #244），硬挂着的行会让**整条预设**
         被判 broken。这里用宿主安装根上的 `createRequire().resolve` 逐行解析；解析不到的
         必须带停用条件、并且按宿主的方式求值为 true。
-     5. **阅读端的槽位形状**：`lib/client.js` 往 `main` / `sidebar.panellist` 注册的那两项，
+     5. **阅读端的槽位形状**：`lib/client.js` 往 `main` / `sidebar.panellist` / `sidebar.right.pane.tab` / `plugins.detail.section` / `plugins.row.config` 注册的那几项，
         必填注册项（`main` 的 `key`、`sidebar.panellist` 的 `id`）由宿主的槽位契约目录定
         （`dsh-cordis-client-runner/lib/client.js`）。这里读那份目录，按 `kind` 与
-        `registerOptions` 里的 `required` 逐项对；同时解析 `dsh.client.inject` 的六个包。
+        `registerOptions` 里的 `required` 逐项对；同时解析 `dsh.client.inject` 的七个包。
    ───────────────────────────────────────────────────────────────────────── */
 
 import assert from 'node:assert/strict';
@@ -234,6 +234,7 @@ test('宿主契约：预设里每一行的模块都解析得到，解析不到�
     const file = path.join(ROOT, relative);
     const rows = presetRows(parseYaml(fs.readFileSync(file, 'utf8'), {
       file, tags: 'expression', blockScalars: true, plainScalarContinuation: true,
+      quotedScalarContinuation: true,
     }));
     assert.ok(rows.length > 0, `${label}的预设一行都没读出来：${relative}`);
     for (const row of rows) {
@@ -297,10 +298,10 @@ test('宿主契约：阅读端注册的槽位仍由宿主声明，必填注册�
   }
   const catalog = fs.readFileSync(modulePath, 'utf8');
 
-  // dsh.client.inject 那六个包：宿主升级时删/并掉一个，客户端就只剩半套服务。
+  // dsh.client.inject 那七个包：宿主升级时删/并掉一个，客户端就只剩半套服务。
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const injected = manifest.dsh?.client?.inject ?? [];
-  assert.ok(injected.length >= 6, `package.json 的 dsh.client.inject 应该至少六项，实际 ${injected.length} 项`);
+  assert.ok(injected.length >= 7, `package.json 的 dsh.client.inject 应该至少七项，实际 ${injected.length} 项`);
   const hostRequire = createRequire(path.join(runtime, 'package.json'));
   const unresolved = injected.filter(name => {
     try { hostRequire.resolve(name); return false; } catch { return true; }
@@ -309,21 +310,33 @@ test('宿主契约：阅读端注册的槽位仍由宿主声明，必填注册�
     `dsh.client.inject 里这些包在这个宿主上解析不到：${unresolved.join('、')}——`
     + '宿主可能合并/改名了客户端模块，先读新版宿主再改 package.json');
 
-  // 走一遍 apply，只接住 slots.register 的那两次调用。
+  // 走一遍 apply，接住 slots.register 的每一次调用。宿主服务（locale / sidebarRightTabs / slots）
+  // 用最小桩给齐：右栏 body、插件页的状态卡与配置卡都只在服务就绪时才注册，桩缺一件它们就静默跳过。
   const registrations = [];
   const { plugin } = loadClient();
-  plugin.apply({
-    get: () => null,
-    slots: {
-      inject: (name, factory) => { factory(); return () => {}; },
-      register: (config, component) => { registrations.push({ config, component }); return () => {}; },
-    },
-    effect: (register) => { register(); return () => {}; },
-  });
+  const fakeLocale = { register: () => () => {}, bind: () => (k) => k };
+  const fakeTabs = { register: () => () => {} };
+  const slots = {
+    inject: (name, factory) => { factory(); return () => {}; },
+    register: (config, component) => { registrations.push({ config, component }); return () => {}; },
+  };
+  const services = { locale: fakeLocale, sidebarRightTabs: fakeTabs, slots };
+  const ctx = {
+    get: (name) => (name in services ? services[name] : null),
+    inject: (deps, callback) => { callback(ctx); },
+    effect: (register) => { const dispose = register(); return typeof dispose === 'function' ? dispose : () => {}; },
+    slots,
+  };
+  plugin.apply(ctx);
 
-  const names = registrations.map(({ config }) => config.name).sort();
-  assert.deepEqual(names, ['main', 'sidebar.panellist'],
-    `阅读端应该只往 main 与 sidebar.panellist 注册（宿主忽略了别的槽位），实际：${names.join('、')}`);
+  // 槽位名以 lib/client.js 实际注册的为准：main、sidebar.panellist、右栏 body
+  // （RIGHTBAR_BODY_SLOT = 'sidebar.right.pane.tab'）、插件页两处。
+  // 按 name 去重：侧栏入口在 locale 就绪时会先 dispose 再按本地化文案重注册（桩里同步触发），
+  // 同一次 apply 能看到两条 sidebar.panellist；真实宿主里任一时刻只挂一条。
+  const names = [...new Set(registrations.map(({ config }) => config.name))].sort();
+  assert.deepEqual(names, [
+    'main', 'plugins.detail.section', 'plugins.row.config', 'sidebar.panellist', 'sidebar.right.pane.tab',
+  ], `阅读端的槽位注册不全（宿主忽略了别的槽位），实际：${names.join('、')}`);
 
   // 反证：随便编一个槽位名，目录里必须找不到——否则下面的对照就是空转。
   assert.equal(hostSlotContract(catalog, 'studymate.no-such-slot'), null,
