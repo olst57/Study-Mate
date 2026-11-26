@@ -2,6 +2,18 @@
 
 > **入库与引用约定**：本文档作为独立 `docs` 提交入库，与四个功能 PR 解耦。文中所有 `ADR-xxxx` 编号一律写成纯文本、不做相对路径链接——功能 PR 回滚时会连带删除对应 ADR 文件，做成链接会导致回滚后触发 `test_docs_references.mjs` 断链报错。
 
+## 落地状态（截至 v2.1.0 合并）
+
+- **已落地**：PR 2（`feat/adhd-rhythm`，ADR-0023）、PR 3（`feat/adhd-lessons`，ADR-0024）、PR 4（`feat/adhd-lab`，ADR-0025）已合入 `main`，对应规则与测试在位。
+- **未落地**：PR 1（`feat/teaching-persona`）分支未合入。本方案中归 PR 1 的下列事项只是设计意图，当前代码与文档并未包含，不构成已交付承诺：
+  1. `lesson-design` §五 5.5 第 8 条（提取失败 ≠ 没掌握）与新增 5.6（可覆盖与不可覆盖）；
+  2. `templates/MEMORY.yaml` 第 4 行注释收口；
+  3. `scripts/tests/rule-owners.json` 的 `reaches.learning-system` 补 `lesson-design`；
+  4. `GLOSSARY.md` 新增「讲课人格」「讲法」词条；
+  5. `test_skill_rules.mjs` 新增 12 份 `SKILL.md` 禁标签短语扫描测试；
+  6. `learning-coach` 第 3 步例外、`local-qa` 第 1 条、`preset/qa/agent.cordis.yml` 人设自包含三条、`使用说明.md` L23「讲法可调、人格固定」、`设计方案.md` §3.3/§3.5、`工程约束.md` L85 等配套改动。
+- 全文按此状态阅读：PR 2–4 的内容是已实现事实；归 PR 1 的内容是未实现的设计记录。
+
 ## 一、设计背景与三层归属原则
 
 本方案将「注意力稀缺读者」的五个典型痛点转化为系统的默认交互底座。**痛点成因只写在本设计文档与 ADR 中供维护者参考，技能提示词（`preset/skills/**`）只写具体动作指令，且全量 12 份 `SKILL.md` 严禁出现「多巴胺 / 工作记忆 / 挫败敏感 / 学生画像 / 性格画像 / 认知特征 / ADHD / 注意缺陷」等标签短语**（不禁既有合法术语「画像三节」），防止模型在对话中产生临床说教感。
@@ -16,13 +28,13 @@
 
 ### 三层归属拍板原则
 
-1. **人格层（固定，不可覆盖）**：归属 `lesson-design` §五（口气、emoji 密度、故事钩子、跑题必回主线、八条底线），学生与共享记忆均不可覆盖。
-2. **讲法层（可覆盖，倾向性指引）**：归属 `lesson-design` §一 与共享记忆「教学偏好」（先讲什么、深浅、例子来源、节奏），允许学生随时调整；`MEMORY.yaml` 只记录学生明确说过的讲法选择，绝不推断学生的认知特征与性格。
+1. **人格层（固定，不可覆盖）**：归属 `lesson-design` §五（口气、emoji 密度、故事钩子、跑题必回主线、七条共同底线），学生与共享记忆均不可覆盖；三层落地规则（5.6）尚未写入，见「落地状态」。
+2. **讲法层（可覆盖，倾向性指引）**：归属 `lesson-design` §一 与共享记忆「教学偏好」（先讲什么、深浅、例子来源、节奏），允许学生随时调整；`MEMORY.yaml` 的「教学偏好」分节用于记录讲法选择，但「只记明确说过的选择、不推断认知特征与性格」的收口尚未落地（见「落地状态」）。
 3. **数据层（中性，不受人格约束）**：归属各自 owner（大纲节点标题与描述、题目字段、学习档案），保持客观中性。
 
 ### 两条跨模块细则归位
 
-* **提取失败 ≠ 没掌握**：并入 `lesson-design` §五 5.5 第 8 条底线——学生说「学过但想不起来」时给线索或半个例子唤醒，不整块重讲，也不按已掌握跳过。
+* **提取失败 ≠ 没掌握**：并入 `lesson-design` §五 5.5 第 8 条底线（未落地）——学生说「学过但想不起来」时给线索或半个例子唤醒，不整块重讲，也不按已掌握跳过。
 * **错题脱敏句式单一出处**：固定句式「这里有个坑：〈坑〉。不是你记性差」只在 `layered-practice` §三 出题要求（`why` 字段）定义一次，`learning-system` 只写指向说明。
 
 ## 二、可观测验收标准
@@ -31,15 +43,15 @@
 2. **课件路标与呼吸感**：常规课件开头含「约 14 分钟 · 三步」路线（实验课说明页不出题，写单元学时 20），每节首行亮结论，连续散文 ≤3 行，每节末尾有「这里可以停」，课末有「带走三句话」。
 3. **学时与题量闭环**：整单元 20 分钟内完成——常规课整篇课件 14 分钟内读完（约 3 节时单节 ≈5 分钟），配合 ≤6 分钟练习，且第一题看一眼即答得出；单节点新术语 ≤3 个。
 4. **项目半成品起步**：lab 任务目录自带可运行但功能不全的起点，学生每次只改一处、5 分钟内看到运行与断言结果。
-5. **人格与讲法解耦**：学生对主教练说「写正式一点」时，讲法随之改变（少类比、先定义），但活泼口气、钩子与 emoji 保持不变。
-6. **门禁与回滚闭环**：`node scripts/release/checks.mjs --static` 与提示词测试套件全绿；四个功能 PR 任意单独 revert 无冲突且检查全绿。
+5. **人格与讲法解耦**：学生对主教练说「写正式一点」时，讲法随之改变（少类比、先定义），但活泼口气、钩子与 emoji 保持不变（依赖 PR 1 的三层落地规则，当前未落地）。
+6. **门禁与回滚闭环**：`node scripts/release/checks.mjs --static` 与提示词测试套件全绿；已合入的三个功能 PR（PR 2–4）任意单独 revert 无冲突且检查全绿。
 
 ## 三、PR 拆分与数字旋钮边界
 
 | 批次 | 分支名称 | 核心交付 | 绑定 ADR |
 | :--- | :--- | :--- | :--- |
 | Docs | docs/adhd-blueprint（分支名，不写成行内代码——它不是仓库路径） | 独立提交本方案文档（纯文本引用 ADR 编号） | 无 |
-| PR 1 | `feat/teaching-persona` | 人格落地无矛盾、12 技能禁标签短语扫描、三层归属、底线第 8 条 | 无（设计见本方案） |
+| PR 1（未落地） | `feat/teaching-persona` | 人格落地无矛盾、12 技能禁标签短语扫描、三层归属、底线第 8 条 | 无（设计见本方案） |
 | PR 2 | `feat/adhd-rhythm` | 对话节奏：3 行开场、断更重连、默认项、阶梯救援、停车场 | ADR-0023 |
 | PR 3 | `feat/adhd-lessons` | 材料节奏：20 分钟单元、§三课件骨架子节（14 分钟路线）、6 分钟题、首题秒答 | ADR-0024 |
 | PR 4 | `feat/adhd-lab` | 项目节奏：lab 可运行起点、单步 5 分钟、与干净态断言失败的界限 | ADR-0025 |
@@ -51,46 +63,46 @@
 
 ## 四、5 处契约与断路点处理
 
-1. **`templates/MEMORY.yaml` 第 4 行注释收口**：将「优先级高于任何通用指引」收口到「讲法偏好」，并明确「只记学生明确说过的讲法选择，不推断认知特征与性格」；旧工作区不回填，记入本方案。
-2. **`scripts/tests/README.md` 第 92 行计数**：PR 1 将 `lesson-design` 加入 `reaches.learning-system` 后，「三份协议」同步改为「四份」。
+1. **`templates/MEMORY.yaml` 第 4 行注释收口**：将「优先级高于任何通用指引」收口到「讲法偏好」，并明确「只记学生明确说过的讲法选择，不推断认知特征与性格」；旧工作区不回填，记入本方案。（未落地）
+2. **`scripts/tests/README.md` 第 92 行计数**：PR 1 将 `lesson-design` 加入 `reaches.learning-system` 后，「三份协议」同步改为「四份」（未落地）。
 3. **`learning-system` 切片锚点与步数保护**：`## 新科目盘问（你亲自执行）` 与 `## 对话节奏` 是 `test_skill_rules.mjs:939` 切片锚点，且盘问固定为 `1.`～`7.` 七步，PR 2 严禁改标题或加第 8 步。
 4. **选项约定分阶段隔离**：`learning-discovery` 探索阶段保持「不标推荐、不排序暗示」一字不改；PR 2 的默认项仅限 `learning-system` 的盘问（第 2、4 步）与学习路径选择。
-5. **`GLOSSARY.md` 补齐词条**：PR 1 新增「讲课人格」与「讲法」两条定义及 `_Avoid_` 说明。
+5. **`GLOSSARY.md` 补齐词条**：PR 1 新增「讲课人格」与「讲法」两条定义及 `_Avoid_` 说明。（未落地）
 
 ## 五、文件与 Hunk 归属表
 
 | 文件路径 | 改动位置与摘要 | 归属 PR |
 | :--- | :--- | :--- |
-| `preset/skills/lesson-design/SKILL.md` | §四.1/4.4/4.5、§五 L82 去归因改动作句（保 `让他愿意读下一段`）、5.2、5.5 第 8 条、新增 5.6 | PR 1 |
+| `preset/skills/lesson-design/SKILL.md` | §四.1/4.4/4.5、§五 L82 去归因改动作句（保 `让他愿意读下一段`）、5.2、5.5 第 8 条、新增 5.6 | PR 1（未落地） |
 | `preset/skills/lesson-design/SKILL.md` | §三 保持原表不动，下增子节 `### 课件骨架：路线、可停点、收口`（含 14/20 派生路线、结论先行、散文 ≤3 行、术语大白话、每节可停、带走三句、对 §四.4 的功能路标豁免句） | PR 3 |
 | `preset/skills/learning-system/SKILL.md` | 开场 ≤3 行 + 无罪感重连、`## 对话节奏` 后补单动作与时长、盘问 2/4 步默认项、两步阶梯、停车场（用「学生中途岔开话题」）、收尾 ≤3 项 | PR 2 |
 | `preset/skills/curriculum-designer/SKILL.md` | L21（20 分钟单元、单节点单产出、≤3 新术语、名词短语可检索命名） | PR 3 |
 | `preset/skills/layered-practice/SKILL.md` | L48（≤6 分钟）+ §三（首题秒答、错题脱敏句式唯一出处） | PR 3 |
 | `preset/skills/layered-practice/SKILL.md` | §六（起点能跑、一次只改一处、5 分钟见结果、与干净态断言失败的界限） | PR 4 |
 | `preset/skills/practice-evaluator/SKILL.md` | L23/L26（从骨架起 → 起点必须能跑、一次只改一处） | PR 4 |
-| `preset/skills/learning-coach/SKILL.md` | 第 3 步例外（换讲课口径属明确新交付大改） | PR 1 |
+| `preset/skills/learning-coach/SKILL.md` | 第 3 步例外（换讲课口径属明确新交付大改） | PR 1（未落地） |
 | `preset/skills/learning-coach/SKILL.md` | 课件要求段（开头路线口径见 `lesson-design` §三、每节独立可读允许跳读） | PR 3 |
-| `preset/skills/local-qa/SKILL.md` | 第 1 条（字数上限以本条「短」为准，人设只管口气） | PR 1 |
-| `preset/qa/agent.cordis.yml` | 人设行改为自包含三条，删外部指向 | PR 1 |
+| `preset/skills/local-qa/SKILL.md` | 第 1 条（字数上限以本条「短」为准，人设只管口气） | PR 1（未落地） |
+| `preset/qa/agent.cordis.yml` | 人设行改为自包含三条，删外部指向 | PR 1（未落地） |
 | `bin/antigravity-skill-compat.mjs` | L155（20 分钟）、L163（名词短语可检索）+ 讲解提示（开头路线、每节可停、带走三句话） | PR 3 |
-| `templates/MEMORY.yaml` | L4 注释（收口到讲法 + 只记明确选择、不推断认知特征与性格） | PR 1 |
-| `GLOSSARY.md` | 新增「讲课人格」「讲法」两条 | PR 1 |
-| `scripts/tests/rule-owners.json` | `reaches.learning-system` 补 `lesson-design` | PR 1 |
-| `scripts/tests/README.md` | L92「三份」改「四份」 | PR 1 |
-| `scripts/tests/test_skill_rules.mjs` | L757 负例换 `layered-practice`；补 PR 1 新规则 pin；在 `FORBIDDEN` 循环 test 之后（约 L890）新增全量 12 技能禁标签短语 test（不碰 `FORBIDDEN` 常量） | PR 1 |
+| `templates/MEMORY.yaml` | L4 注释（收口到讲法 + 只记明确选择、不推断认知特征与性格） | PR 1（未落地） |
+| `GLOSSARY.md` | 新增「讲课人格」「讲法」两条 | PR 1（未落地） |
+| `scripts/tests/rule-owners.json` | `reaches.learning-system` 补 `lesson-design` | PR 1（未落地） |
+| `scripts/tests/README.md` | L92「三份」改「四份」 | PR 1（未落地） |
+| `scripts/tests/test_skill_rules.mjs` | L757 负例换 `layered-practice`；补 PR 1 新规则 pin；在 `FORBIDDEN` 循环 test 之后（约 L890）新增全量 12 技能禁标签短语 test（不碰 `FORBIDDEN` 常量） | PR 1（未落地） |
 | `scripts/tests/test_skill_rules.mjs` | L65-78 附近补 PR 2 的 9 条 pin | PR 2 |
 | `scripts/tests/test_skill_rules.mjs` | L354、L534、L586、L735 题量与骨架 pin 更新；`FORBIDDEN` 末尾（约 L882）追加 `40分钟...` 与 `≤10 分钟`；文件最末尾（约 L1061）新增 `20 - 6 === 14` 算术守恒测试 | PR 3 |
 | `scripts/tests/test_skill_rules.mjs` | `RULES['layered-practice']` 数组末尾（约 L398）追加 3 条 lab pin | PR 4 |
-| `docs/使用/使用说明.md` | L23（讲法可调、人格固定） | PR 1 |
+| `docs/使用/使用说明.md` | L23（讲法可调、人格固定） | PR 1（未落地） |
 | `docs/使用/使用说明.md` | L14-L15（3 行开场与单动作下一步） | PR 2 |
 | `docs/使用/使用说明.md`、`README.md` | L97 新小节「一次读多久」（20 分钟含 ≤6 分钟题、停靠点说明）；`README.md` 加「为注意力稀缺的读者设计」 | PR 3 |
 | `docs/使用/使用说明.md` | §三 L93 `lab（引导式实操）` 末尾补一句 lab 起点能跑与 5 分钟步幅 | PR 4 |
-| `docs/设计/设计方案.md`、`工程约束.md` | 设计方案 §3.3/§3.5、工程约束 L85 | PR 1 |
+| `docs/设计/设计方案.md`、`工程约束.md` | 设计方案 §3.3/§3.5、工程约束 L85 | PR 1（未落地） |
 | ADR-0023 ～ ADR-0025 | PR 2–4 各自新增对应的单一 ADR 文件（PR 1 无独立 ADR，设计见本方案） | PR 2–4 |
 
 ## 六、分 PR 交付清单
 
-### PR 1：`feat/teaching-persona`（人格落地无矛盾）
+### PR 1：`feat/teaching-persona`（人格落地无矛盾，未合入）
 
 1. **`lesson-design` 修订**：
    * §四.1 补出口句：「『你以为……其实正好相反』只在误解真实存在时用——那正是本条的『保留』情形」。
