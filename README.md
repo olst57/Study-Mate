@@ -7,7 +7,7 @@
 <p align="center">
 <img src="https://img.shields.io/badge/DSH-%E5%AD%A6%E4%B9%A0%E6%A8%A1%E5%BC%8F%E9%A2%84%E8%AE%BE-1c5a40" alt="DSH 学习模式预设">
 <img src="https://img.shields.io/badge/Antigravity-%E5%A4%9A%E6%99%BA%E8%83%BD%E4%BD%93%E6%8F%92%E4%BB%B6-4285f4" alt="Antigravity 插件">
-<img src="https://img.shields.io/badge/Node.js-22.19%2B%20%7C%2024-339933" alt="Node.js">
+<img src="https://img.shields.io/badge/Node.js-24%2B-339933" alt="Node.js">
 <img src="https://img.shields.io/github/license/Miaotofu01/Study-Mate" alt="MIT License">
 </p>
 
@@ -135,7 +135,7 @@ npm test
 
 它不需要真实 DSH、浏览器或模型服务；测试自己造临时科目，不碰你的学习工作区。引擎脚本已经没有了（Python 随 #83 退役），**原生工具的清单与参数**只有两个出处：代码是 [`lib/tools/index.ts`](lib/tools/index.ts)，人读的那份是[原生工具契约](preset/skills/learning-system/references/tools.md)；各命令的前置、按需入口（真实浏览器、真实 DSH）与退出码语义见[测试说明](scripts/tests/README.md)——几处各是唯一出处，本文不重抄。
 
-独立 Web 运行时（`study-mate-web/`，FastAPI + Next.js）曾落在主线，现已移出到分支 [`web/0.7.0-beta`](https://github.com/Miaotofu01/Study-Mate/tree/web/0.7.0-beta)——它自带一套引擎，与插件端读写同一份学习工作区，等有人把它适配到新引擎后合回。为什么移出、合回前必须满足什么，见 [ADR-0013](docs/adr/0013-Web运行时移出主线.md)。
+独立 Web 运行时分支 [`web/0.7.0-beta`](https://github.com/Miaotofu01/Study-Mate/tree/web/0.7.0-beta)处于初期开发阶段中——它自带一套引擎，与插件端读写同一份学习工作区，很多功能尚不完善，故放至分支留档。
 
 ## 项目结构
 
@@ -145,6 +145,8 @@ npm test
 DSH 侧就是**一个插件包**（`@yunmiao/studymate`）：Host 半注册原生工具与阅读端数据路由，Client 半是阅读端本体；预设与工作区配置由安装器写。学习数据默认位于独立的 `~/StudyMate`，无需保留源码仓库；详见 [安装说明](docs/使用/安装.md)。
 
 学习工作区里面长什么样（科目文件夹、课件、lab、档案、课型与题型），见 [使用说明 §六](docs/使用/使用说明.md#六学习数据存在哪)。
+
+新功能**无界笔记**，在学习界面的左上角中切换，拥有独立的笔记界面、无界画布与节点等内容。功能仍在开发中。相关文档见：状态唯一出处是[无界笔记设计](docs/设计/无界笔记.md) §0；模块、单入口构建与独立数据域见 [ADR-0015](docs/adr/0015-无界笔记模块与独立数据域.md)，首轮持久化见 [ADR-0016](docs/adr/0016-无界笔记持久化与单文件版本栅栏.md)，保留下来的网页开发与验收入口见 [`prototypes/unbounded-notes/`](prototypes/unbounded-notes/README.md)。
 
 ## 常见问题
 

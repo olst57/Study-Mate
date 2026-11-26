@@ -24,12 +24,29 @@
 //   · 注册**只**走 lib/tools/index.ts 那两个入口（宿主层 `registerStudyMateHost`、
 //     agent 层 `registerStudyMateTools`）。#69/#70/#73/#74 往那个清单里各加一行，
 //     不在这个文件里写具体工具。
+import z from '@deepseek-ai/schemastery';
+
 import { installPayload } from './studymate.mjs';
 
+/* ── 原生配置（插件页「配置」那一页）────────────────────────────────────
+   `workspace` 走**原生 config**：安装器写进 `studymate-config.yaml` 的那份仍是默认值，
+   这里只在用户从插件页选了目录之后覆盖它（优先级判断只有 `lib/workspace.ts` 那一处）。
+   `.volatile()` 让改完立即生效、不重载插件；文件监听的重挂由 `loader/volatile-update` 负责。
+
+   schemastery 由宿主提供（与 `dsh-win-pwsh7` 同一条），包内只把它列为可选 peer +
+   devDependency（本地类型检查与测试用）；`bin/dsh-plugin.mjs` 把这个 `Config` 原样转出去
+   ——宿主读的是那个入口，不是本文件。 */
+export const Config = z.object({
+  workspace: z.string()
+    .description('学习工作区目录（绝对路径）；留空则沿用安装器写入的 studymate-config.yaml')
+    .volatile(),
+});
+
 /* ── 宿主的插件上下文 ────────────────────────────────────────────────────
-   本仓库不依赖宿主的类型包（Host 半是零依赖的插件），所以按**用到的成员**描述形状：
-   全部可选——缺 connection 的组合（headless / tui）与更老的宿主都会传进来一个残缺的 ctx，
-   下面每一步都在运行期自己判一次。 */
+   本仓库不依赖宿主的**类型包**；运行期只有一件宿主同款的 schema 库
+   （`@deepseek-ai/schemastery`，给原生 `Config` 用，动态 import、拿不到就退回无表单）。
+   其余按**用到的成员**描述形状：全部可选——缺 connection 的组合（headless / tui）与更老的
+   宿主都会传进来一个残缺的 ctx，下面每一步都在运行期自己判一次。 */
 
 /** `ctx.get('profileContext')` 给的 profile 归属。 */
 interface ProfileContext {
@@ -61,6 +78,8 @@ interface PluginContext {
   agentPresets?: { register: (config: unknown) => unknown };
   effect?: (fn: () => unknown, description?: string) => unknown;
   inject?: (names: string[], handler: (ctx: InjectedContext) => void) => unknown;
+  /** cordis 事件（这里只订阅 `loader/volatile-update`：原生 config 变更后的收尾）。 */
+  on?: (event: string, handler: (...args: unknown[]) => void) => unknown;
 }
 
 export const inject = ['agentPresets'];
@@ -69,10 +88,44 @@ const LIBRARY_PATH = '/api/studymate/library';
 const ASSET_PATH = '/api/studymate/asset';
 const REFERENCE_PATH = '/api/studymate/reference';
 
-export async function apply(ctx: PluginContext): Promise<void> {
+export async function apply(
+  ctx: PluginContext,
+  config?: { workspace?: { get?: () => unknown } },
+): Promise<void> {
+  // 原生 config 的 workspace 优先于安装器 YAML：接上 volatile 引用（优先级只在 lib/workspace.ts）。
+  try {
+    const { setWorkspaceOverride } = await import('../lib/workspace.ts');
+    const workspaceRef = config?.workspace;
+    const dispose = setWorkspaceOverride(() => {
+      try {
+        const value = workspaceRef && typeof workspaceRef.get === 'function' ? workspaceRef.get() : undefined;
+        return typeof value === 'string' ? value : '';
+      } catch {
+        return '';
+      }
+    });
+    // 与其余注册同一种姿势：卸载/禁用时拆掉自己那一份，别让模块级引用指着一个已经没了的 config。
+    if (typeof ctx.effect === 'function') {
+      try {
+        ctx.effect(() => dispose, 'studymate: 原生配置 workspace');
+      } catch {
+        dispose();
+      }
+    }
+  } catch {
+    // 拷出去跑的边界夹具没有 lib/：没有 override 就等于沿用安装器配置
+  }
+
+  /* 这次 apply 里预设没注册上的原因，空串＝正常。解析失败（例如 profile 补丁里的跨行 flow
+     集合，#317）以前只留一行 console.warn：预设不注册、config 不落盘，用户在界面上看到的却是
+     「没有学习工作区」。原因随后交给插件页状态卡（`GET /api/studymate/status` 的
+     `registration` 字段）与 no-workspace 信封。刻意做成**每次 apply 一份**：同一个进程里
+     两个 profile 共用这个模块，一个失败不该让另一个也显示失败。 */
+  let startupFailure = '';
   const profile = ctx.get?.('profileContext');
   if (!profile || !ctx.agentPresets?.register) {
-    console.warn('StudyMate：当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。');
+    startupFailure = '当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）';
+    console.warn(`StudyMate：${startupFailure}；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。`);
   } else {
     try {
       // installPayload 在 bin/studymate.mjs（本次不迁）：TS 从 JS 里推断出「四个必填参数」，
@@ -88,8 +141,9 @@ export async function apply(ctx: PluginContext): Promise<void> {
         await ctx.effect!(() => ctx.agentPresets!.register(registration.qaConfig));
       }
     } catch (error) {
+      startupFailure = error instanceof Error ? error.message : String(error);
       // Startup may report a problem, but must not migrate profile ownership.
-      console.warn(`StudyMate：已跳过原生加载。${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`StudyMate：已跳过原生加载。${startupFailure}`);
     }
   }
 
@@ -113,11 +167,51 @@ export async function apply(ctx: PluginContext): Promise<void> {
     console.warn(`StudyMate：宿主层注册失败（任务类型/路由/监听）。${error instanceof Error ? error.message : String(error)}`);
   }
 
+  // ── 插件页：只读状态（`GET /api/studymate/status`）──────────────────────
+  // 与阅读端那几条同一种姿势：各自 `inject(['connection'])`，缺了不挂、挂不上只警告。
+  // watch 状态由这里（bin 域）读，lib 域不 import watch——否则 lib → watch → lib 成环。
+  // 预设注册的成败也一并交出去：解析失败时状态卡要能说出「哪份文件、什么错误」，而不是空着说没配置。
+  void import('../lib/status-route.ts')
+    .then(async (module) => {
+      const { watchState } = await import('../lib/watch/index.ts');
+      module.registerStatusRoute(ctx, {
+        profile: profile?.name,
+        registration: { ok: startupFailure === '', error: startupFailure },
+        watch: () => watchState(),
+      });
+    })
+    .catch((error) => { console.warn(`StudyMate：插件页状态路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 原生 config 的 workspace 是 volatile：值本身立即生效（resolveWorkspace 每次现读），
+  // 但文件监听是启动时按旧目录起的——变了就停掉再起，否则页面收不到新目录的变更推送。
+  // 事件只带「哪些路径变了」，我们只关心顶层 `workspace`。
+  if (typeof ctx.on === 'function') {
+    try {
+      ctx.on('loader/volatile-update', (paths: unknown) => {
+        const changed = Array.isArray(paths)
+          && paths.some((entry) => Array.isArray(entry) && entry[0] === 'workspace');
+        if (!changed) return;
+        void import('../lib/watch/index.ts')
+          .then(({ restartWatching }) => restartWatching(ctx as unknown as Parameters<typeof restartWatching>[0]))
+          .catch(() => { /* 监听重挂失败只影响推送，状态与阅读照常 */ });
+      });
+    } catch {
+      // 没有 on 的宿主：改完工作区后变更推送要等重启（状态本身实时）
+    }
+  }
+
   /* 错误信封的唯一构造点（`lib/route-envelope.ts`）。**动态取**：这个文件会被
      `test_bundle.mjs` 单独拷进一个没有 `lib/` 的目录里跑（那里模拟的是安装器边界失败），
      顶层静态 import 会让那条用例在解析期就崩——与下面几条路由的 lib/ 依赖同一姿势。 */
   const envelope = async (status: number, code: string, message: string): Promise<Response> =>
     (await import('../lib/route-envelope.ts')).routeError(status, code, message);
+
+  // 没工作区时给的那句「先跑一次 install」只在预设注册成功时成立：启动就失败（例如补丁解析不过）
+  // 的场合，安装器走的是同一份补丁，再跑一遍也是同一个错误。把失败原因一并说清（#317）。
+  const noWorkspaceMessage = startupFailure === ''
+    ? '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。'
+    : `没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。原生加载失败（${startupFailure}）。`
+      + '先修好这条错误，再重跑一次 npx @yunmiao/studymate install。';
 
   // ── 阅读端的数据通路 ───────────────────────────────────────────────────
   // 每次请求现读工作区：学习文件是纯文本、体量小（目标态 §12「按需扫描足够」），
@@ -139,7 +233,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
           ]);
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
+            return envelope(500, 'no-workspace', noWorkspaceMessage);
           }
           // #222：阅读端按科目隔离坏数据——一门读不了，其余科目照常打开，坏的那门带错误
           // 进 `unreadable` 由页面点名。导出与原生工具不传这个开关，照旧整份失败。
@@ -191,7 +285,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
           const { resolveWorkspace } = await import('../lib/workspace.ts');
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
+            return envelope(500, 'no-workspace', noWorkspaceMessage);
           }
           const { readReference, writeReference } = await import('../lib/reference.ts');
 
@@ -229,12 +323,15 @@ export async function apply(ctx: PluginContext): Promise<void> {
         }
       },
     }), 'studymate: 参考资料路由');
-
-    // 文件监听与变更推送（#74）：监听在学习工作区那一侧（lib/watch，由 lib/tools 的
-    // registerStudyMate 起），这里只挂推送路由——它要的 connection 只有这个注入点拿得到。
-    // 动态 import 与上面同一姿势（这个文件会被 test_bundle 拷到没有 lib/ 的临时目录里跑）。
-    void import('../lib/watch/index.ts').then((watch) => watch.registerWatchChannel(connectionCtx), (error) => console.warn(`StudyMate：变更推送通道没挂上。${error instanceof Error ? error.message : String(error)}`));
   });
+
+  // 独立的 connection 注入负责兼容入口，SSE 模块在同一作用域内订阅 webServer 的生命周期。
+  try {
+    const { registerWatchChannel } = await import('../lib/watch/index.ts');
+    ctx.inject(['connection'], (connectionCtx) => { registerWatchChannel(connectionCtx); });
+  } catch (error) {
+    console.warn(`StudyMate：变更推送通道没挂上。${error instanceof Error ? error.message : String(error)}`);
+  }
 
   /* ── 另外那几条路由：各子系统自己 inject(['connection']) ───────────────────
      注册约定只有一种——**收外层 ctx、自己注入**（与 `registerTaskRoute` 逐字相同）。
@@ -246,6 +343,10 @@ export async function apply(ctx: PluginContext): Promise<void> {
 
   // 作答数据（#72）：路径、方法、请求体、状态码映射都在 lib/attempts-route.ts 里，这里只挂一行
   import('../lib/attempts-route.ts').then((module) => module.registerAttemptRoutes(ctx), (error) => { console.warn(`StudyMate：作答数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 课件页标注（ADR-0021）：作答数据族的第二个文件，路径、方法、请求体、状态码映射都在
+  // lib/annotations-route.ts 里，这里同样只挂一行（注释见那段文件头）。
+  import('../lib/annotations-route.ts').then((module) => module.registerAnnotationRoutes(ctx), (error) => { console.warn(`StudyMate：课件标注路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 
   // 实验代跑（#77）：学生按「跑一次」→ POST /api/studymate/lab-run。计划与执行与原生工具
   // studymate_lab_run 共用一份实现，这里也只挂一行。
@@ -260,4 +361,8 @@ export async function apply(ctx: PluginContext): Promise<void> {
   // 数学式时阅读端才来取。清单、MIME 与边界判据在 lib/math.ts，注册在 lib/math-route.ts
   // （一条文件一条精确路由），这个文件同样不认识它们的形状。
   import('../lib/math-route.ts').then((module) => module.registerMathRoute(ctx), (error) => { console.warn(`StudyMate：公式资源路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 无界笔记（#268）：独立 DSH 数据域，不复用学习工作区或 reference 的写入路径。
+  // 自己注入 connection；源码缺失/服务不支持时只让笔记显示不可用，不拖垮学习预设。
+  void import('../lib/notes/route.ts').then(({ registerNotesRoute }) => registerNotesRoute(ctx)).catch((error) => { console.warn(`StudyMate：无界笔记数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 }

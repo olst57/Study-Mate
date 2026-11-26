@@ -115,12 +115,25 @@ export interface ExportData {
 /**
  * `data.js`：整份快照就是一段 JSON 赋值。
  *
+ * 快照里打一个**只读标记**（`library.offline: true`）：
+ *   · 导出产物是**快照**，没有 Host 半——`host.js` 对写请求一律回 403（作答、参考资料、
+ *     标注都写不进来），离线页里留编辑入口只会让学生点进去撞一头 403；
+ *   · 阅读端据此进入只读模式：标注照常渲染（高亮 / 小标记 / 列表），但编辑、删除、
+ *     「重新指定到当前段落」与「带着标注提问」这些入口不出现，也不发起写请求。
+ * 标记挂在 `library` 这一层而不是宿主内部全局：阅读端读的是 payload（与 DSH 的
+ * `GET /api/studymate/library` 同一形状），不专为导出页开第二条读法。
+ *
  * 为什么把 `<` 转义掉：内容里出现 `</script>`（比如课件里讲 HTML 的代码块）会把脚本标签提前
  * 闭合，页面从此崩在一半——JSON 里 `\u003c` 与 `<` 等价，转义不影响数据。
  */
 export function dataScript(data: ExportData): string {
-  const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028|\u2029/g, (ch) => (ch === '\u2028' ? '\\u2028' : '\\u2029'));
+  const snapshot = (data.library && typeof data.library === 'object' && !Array.isArray(data.library))
+    ? Object.assign({}, data.library as Record<string, unknown>, { offline: true })
+    : { offline: true };
+  const payload = Object.assign({}, data, { library: snapshot });
+  const json = JSON.stringify(payload).replace(/</g, '\\u003c').replace(/\u2028|\u2029/g, (ch) => (ch === '\u2028' ? '\\u2028' : '\\u2029'));
   return `/* StudyMate 导出的离线数据：整份工作区快照（与 DSH 的 GET /api/studymate/library 同一形状）。
+   只读（library.offline = true）：离线页面没有 Host 半，写请求一律 403；阅读端据此隐藏编辑入口。
    只读——离线页面不写任何学习数据。 */
 window.__STUDYMATE_EXPORT__ = ${json};
 `;
@@ -136,7 +149,7 @@ window.__STUDYMATE_EXPORT__ = ${json};
  *   ③ `fetch`：阅读端读的接口（library / reference）就地作答——离线页面没有 Host 半；
  *      **写请求一律回 403 并说清去哪写**（作答与资料都要回 DSH 里写），不假装成功；
  *   ④ 变更推送（#74）：离线页面是快照，没有 Host 半可推——用一个**静默的 EventSource 替身**，
- *      不让真 EventSource 去连 `/api/studymate/events`（`file://` 下必然失败，控制台会脏）；
+ *      不让真 EventSource 去连 `/plugins/studymate/events`（`file://` 下必然失败，控制台会脏）；
  *   ⑤ 取图地址：阅读端按宿主路由写 `/api/studymate/asset?…`，离线页面里图与页面同处一个目录
  *      树（`assets/<科目>/<相对路径>`）。改写在 **`src` 的 setter** 上——晚一步（比如渲染完再
  *      扫 DOM）浏览器已经按旧地址发过请求了，控制台会多一条失败请求。
@@ -261,7 +274,7 @@ export function hostScript(math: boolean): string {
   };
 
   /* ④ 变更推送：离线页面是**导出那一刻的快照**，没有 Host 半可以推。
-     真 EventSource 会去连 /api/studymate/events，在 file:// 下必然失败（控制台一条 CORS、
+     真 EventSource 会去连 /plugins/studymate/events，在 file:// 下必然失败（控制台一条 CORS、
      一条失败请求，浏览器套件按问题计）。所以给一个「永远静默」的替身：不连、不重连、不报错。 */
   function SilentEventSource(url) {
     this.url = String(url);

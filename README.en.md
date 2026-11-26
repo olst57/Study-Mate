@@ -7,7 +7,7 @@
 <p align="center">
 <img src="https://img.shields.io/badge/DSH-Learning%20Mode%20preset-1c5a40" alt="DSH Learning Mode preset">
 <img src="https://img.shields.io/badge/Antigravity-multi--agent%20plugin-4285f4" alt="Antigravity plugin">
-<img src="https://img.shields.io/badge/Node.js-22.19%2B%20%7C%2024-339933" alt="Node.js">
+<img src="https://img.shields.io/badge/Node.js-24%2B-339933" alt="Node.js">
 <img src="https://img.shields.io/github/license/Miaotofu01/Study-Mate" alt="MIT License">
 </p>
 
@@ -128,6 +128,8 @@ For the directory tree, what each directory does, and who maintains which file, 
 On the DSH side, it is **one plugin package** (`@yunmiao/studymate`): the Host half registers the native tools and the reader's data routes, and the Client half is the reader itself. The installer writes the presets and workspace configuration. Study data lives in a separate `~/StudyMate` by default, so you don't need to keep the source repository; see the [installation guide](docs/使用/安装.md).
 
 For what the study workspace looks like inside (subject folders, lessons, labs, records, lesson types, and question types), see [User Guide §6](docs/使用/使用说明.md#六学习数据存在哪).
+
+**Unbounded notes** is a workspace within the existing Study panel, entered through its brand switch. The native DSH view uses a persistence adapter; the standalone web preview remains memory-only and resets on refresh. See [notes design §0](docs/设计/无界笔记.md#0-状态分层) for the current implementation and acceptance status. [ADR-0015](docs/adr/0015-无界笔记模块与独立数据域.md) covers the shared client entry; [ADR-0016](docs/adr/0016-无界笔记持久化与单文件版本栅栏.md) covers the independent data domain and per-file version checks. The retained development and browser acceptance entry is [`prototypes/unbounded-notes/`](prototypes/unbounded-notes/README.md).
 
 ## FAQ
 

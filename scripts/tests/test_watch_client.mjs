@@ -57,6 +57,16 @@ function hooksRuntime() {
     useRef(initial) { const index = cursor++; if (!(index in cells)) cells[index] = { current: initial }; return cells[index]; },
     createElement() { return null; },
     Fragment: Symbol('Fragment'),
+    // #174 ② 的渲染边界要 `extends React.Component`：这里只为「工厂能物化」给一个最小基类。
+    // 这份桩不渲染 DOM，边界的 `getDerivedStateFromError` 一次也跑不到。
+    Component: class Component {
+      constructor(props) { this.props = props; this.state = this.state || {}; }
+
+      setState(patch) {
+        const next = typeof patch === 'function' ? patch(this.state, this.props) : patch;
+        this.state = Object.assign({}, this.state, next || {});
+      }
+    },
   };
   return {
     React,
@@ -161,7 +171,7 @@ test('推送接上了：changed 触发静默重取，重取后引用按上面的
   assert.equal(rendered.returned[0].status, 'loading');
   const cleanups = rendered.runEffects();
   assert.equal(sources.length, 1, '订阅推送的 effect 起了 EventSource');
-  assert.equal(sources[0].url, '/api/studymate/events');
+  assert.equal(sources[0].url, '/plugins/studymate/events');
 
   await sleep(20);
   assert.equal(fetchCount, 1, '挂载那一次 fetch');
@@ -202,7 +212,7 @@ test('推送接上了：changed 触发静默重取，重取后引用按上面的
   assert.equal(sources[0].closed, true, '卸载时要关掉 EventSource');
 });
 
-test('从没连上过就 onerror：关掉 EventSource，不给老宿主留一串重试', () => {
+test('默认路由首次失败后只补试一次旧路由，两条都失败就关闭', () => {
   const sources = [];
   const { qa, runtime } = materialize({
     fetch: async () => ({ ok: true, status: 200, json: async () => payload() }),
@@ -212,5 +222,10 @@ test('从没连上过就 onerror：关掉 EventSource，不给老宿主留一串
   assert.equal(sources.length, 1);
   sources[0].onerror();
   assert.equal(sources[0].closed, true);
+  assert.equal(sources.length, 2);
+  assert.equal(sources[1].url, '/api/studymate/events');
+  sources[1].onerror();
+  assert.equal(sources[1].closed, true);
+  assert.equal(sources.length, 2);
   for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup();
 });

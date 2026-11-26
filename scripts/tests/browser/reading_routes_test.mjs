@@ -456,7 +456,7 @@ function buildFixture(dir, payload, name = 'reading-routes-fixture.html') {
       json: function () { return Promise.resolve({ error: '夹具没有这条接口：' + url }); },
     });
   };
-  // 变更推送（#74）：阅读端挂载即订阅 /api/studymate/events。夹具页走 file://，那条请求只会
+  // 变更推送（#74）：阅读端挂载即订阅 /plugins/studymate/events。夹具页走 file://，那条请求只会
   // 被拦掉、变成一条「失败请求」——而推送不在这一面的验收面上。lib/client.js 认这个早退
   // （typeof EventSource !== 'function' 就不订阅），所以收掉它，别让注定失败的请求污染判据。
   // 这条通道本身由 browser/watch_push_test.mjs 与真 DSH 探针覆盖。
@@ -533,6 +533,8 @@ const HELPERS = `
 const HOME_PROBE = `(() => {
   ${HELPERS}
   const pbar = q('.smb-continue [role="progressbar"]');
+  const brand = box('.smb-topbar .smb-brand');
+  const tools = box('.smb-topbar__tools');
   return {
     width: window.innerWidth,
     breakpoint900: window.matchMedia('(max-width: 900px)').matches,
@@ -545,11 +547,11 @@ const HOME_PROBE = `(() => {
     continueGo: text('.smb-continue__go'),
     continueEmpty: text('.smb-block .smb-empty'),
     progress: pbar ? { now: pbar.getAttribute('aria-valuenow'), max: pbar.getAttribute('aria-valuemax') } : null,
-    motionOptions: qa('.smb-select option').map((el) => el.value),
+    motionOptions: qa('.smb-motionpick .smb-select option').map((el) => el.value),
     layout: {
       wrapPaddingLeft: style('.smb-wrap', 'paddingLeft'),
       crumbMaxWidth: style('.smb-crumb', 'maxWidth'),
-      topbarWrap: style('.smb-topbar', 'flexWrap'),
+      topbarStacked: brand && tools ? tools.y >= brand.y + brand.h - 1 : null,
       continueBarWrap: style('.smb-continue__bar', 'flexWrap'),
       continueProgressWidth: style('.smb-continue__bar .smb-progressbar', 'width'),
       continueProgressBox: box('.smb-continue__bar .smb-progressbar'),
@@ -601,6 +603,9 @@ const LESSON_PROBE = `(() => {
   // 三栏壳自己的宽（不是视口宽）：三条栏加起来、中栏保底这些账都记在它身上
   const frame = lesson ? Math.round(lesson.getBoundingClientRect().width) : 0;
   const railBars = qa('.smb-railbar').reduce((n, el) => n + el.getBoundingClientRect().width, 0);
+  // 右手把只要跨过**右边那一条**窄轨：右边的窄轨宽单独量，别拿两条的和去减
+  const railBarRight = q('.smb-railbar--right');
+  const railBarRightWidth = railBarRight ? railBarRight.getBoundingClientRect().width : 0;
   const railToken = getComputedStyle(q('.smb-root')).getPropertyValue('--smb-rail').trim();
   // 右手把的落点：贴在这一栏的内侧边缘上（窄轨 + 这一栏的宽），量出来对账
   const handle = q('.smb-panehandle[data-side="right"]');
@@ -626,6 +631,7 @@ const LESSON_PROBE = `(() => {
     modes: lesson ? { left: lesson.getAttribute('data-left-mode'), right: lesson.getAttribute('data-right-mode') } : null,
     rails: qa('.smb-rail').length,
     railBars: Math.round(railBars),
+    railBarRight: Math.round(railBarRightWidth),
     railToken,
     frame,
     centerBox: box('.smb-center'),
@@ -818,7 +824,10 @@ const CONTRAST_TARGETS = {
     ['.smb-course__stats span', '主页·三档计数'],
     ['.smb-chip', '主页·状态 chip'],
     ['.smb-crumb', '主页·面包屑'],
-    ['.smb-select', '顶栏·动效档选择器'],
+    ['.smb-motionpick .smb-select', '顶栏·动效档选择器'],
+    ['.smb-motionpick .smb-select option', '顶栏·动效档选项'],
+    ['.smb-fontpick .smb-select', '顶栏·字号档选择器'],
+    ['.smb-fontpick .smb-select option', '顶栏·字号档选项'],
   ],
   subject: [
     ['.smb-subhead__goal', '科目页·目标'],
@@ -976,7 +985,7 @@ try {
       // 两条响应式规则有没有真的落到计算样式与几何上——只看**关系**，不钉值
       const layout = seen.layout;
       check(`${tag} 壳那条规则（.smb-wrap / .smb-topbar / .smb-continue__bar）落到了计算样式上`,
-        layout.topbarWrap === (compact ? 'wrap' : 'nowrap')
+        layout.topbarStacked === compact
         && layout.continueBarWrap === (compact ? 'wrap' : 'nowrap'),
         JSON.stringify(layout));
       check(`${tag} 科目行那条规则（.smb-course）落到了几何上`,
@@ -1099,7 +1108,8 @@ try {
 
       const lessonMetrics = {
         viewport: viewport.key, size: [seen.width, viewport.height], panes: seen.panes, modes: seen.modes,
-        rails: seen.rails, railBarWidth: seen.railBars, railToken: seen.railToken, frame: seen.frame,
+        rails: seen.rails, railBarWidth: seen.railBars, railBarRight: seen.railBarRight,
+        railToken: seen.railToken, frame: seen.frame,
         centerWidth: seen.centerBox && seen.centerBox.w, rightWidth: seen.rightBox && seen.rightBox.w,
         docWidth: seen.docBox && seen.docBox.w,
         docShareOfCenter: seen.docBox && seen.centerBox ? Math.round(seen.docBox.w / seen.centerBox.w * 100) / 100 : null,
@@ -1433,6 +1443,17 @@ try {
           for (const one of part) rows.push(Object.assign({ face: where }, one));
         };
         await measure('home');
+        const selectStyles = await ctx.evaluate(`Array.from(document.querySelectorAll('.smb-motionpick select, .smb-fontpick select'), select => ({
+          scheme: getComputedStyle(select).colorScheme,
+          backgrounds: Array.from(select.options, option => getComputedStyle(option).backgroundColor),
+        }))`);
+        check(`[${theme}·${viewport.key}] 原生选择器菜单跟随宿主明暗`,
+          selectStyles.length === 2 && selectStyles.every(({ scheme }) => scheme === theme), JSON.stringify(selectStyles));
+        // 原生弹层不铺父级 select 的背景；探针沿 DOM 合成背景时看不出这类遗漏。
+        check(`[${theme}·${viewport.key}] 原生选择器每个选项都有自己的背景`,
+          selectStyles.length === 2 && selectStyles.every(({ backgrounds }) => backgrounds.length > 0
+            && backgrounds.every(bg => bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)')),
+          JSON.stringify(selectStyles));
         await ctx.evaluate(OPEN_SUBJECT);
         await ctx.sleep(300);
         await measure('subject');
@@ -1610,11 +1631,12 @@ try {
     const wrongMode = lessons.filter((one) => !one.seen || one.seen.modes.right !== PANE_MODES[one.viewport]);
     check('三档的右栏形态与画布一致（该并排就并排、装不下就盖在正文上）', wrongMode.length === 0,
       wrongMode.map((one) => `${one.viewport}：${one.seen && one.seen.modes.right}（该是 ${PANE_MODES[one.viewport]}）`).join('；'));
-    // 把手落点 = 窄轨 + 这一栏的宽（抽屉也算这一栏）。脚本里若自己写死一份窄轨宽，这里就对不上
+    // 把手落点 = 右边的窄轨 + 这一栏的宽（抽屉也算这一栏）。脚本里若自己写死一份窄轨宽，这里就对不上；
+    // 减的是**右边那一条**（railBarRight），不是两条的和（railBarWidth）——右边只有一条窄轨
     const misaligned = lessons.filter((one) => one.seen && (!one.seen.handle
-      || Math.abs(one.seen.handle.dx - (one.seen.frame - one.seen.railBarWidth - one.seen.handle.pane)) > 1));
+      || Math.abs(one.seen.handle.dx - (one.seen.frame - one.seen.railBarRight - one.seen.handle.pane)) > 1));
     check('三档下把手都贴在栏的内侧边缘上（窄轨宽是量出来的，不是脚本里写死的）', misaligned.length === 0,
-      misaligned.map((one) => `${one.viewport}：${JSON.stringify(one.seen.handle)} 画布 ${one.seen.frame} 窄轨 ${one.seen.railBarWidth}`).join('；'));
+      misaligned.map((one) => `${one.viewport}：${JSON.stringify(one.seen.handle)} 画布 ${one.seen.frame} 右窄轨 ${one.seen.railBarRight}`).join('；'));
     check('三档下正文列都占得住中栏（铺满也算，但绝不是正中一条细条）',
       lessons.every((one) => one.seen && one.seen.docShareOfCenter !== null && one.seen.docShareOfCenter >= 0.6),
       lessons.map((one) => `${one.viewport}:${one.seen && one.seen.docShareOfCenter}`).join(' '));
@@ -1659,17 +1681,17 @@ try {
         ['壳·.smb-wrap 的内边距', (one) => one.wrapPaddingLeft],
         ['壳·.smb-crumb 的宽度上限', (one) => one.crumbMaxWidth],
         ['壳·.smb-continue__bar 里进度条占满一行', (one) => one.continueProgressWidth],
-        ['壳·.smb-topbar 允许换行', (one) => one.topbarWrap],
+        ['壳·顶栏操作区移到第二行', (one) => one.topbarStacked],
         ['壳·.smb-continue__bar 允许换行', (one) => one.continueBarWrap],
         ['科目行·.smb-course 允许换行', (one) => one.courseWrap],
       ];
       const differing = declarations.filter(([, read]) => read(wide) !== read(narrow));
       const inert = declarations.filter(([, read]) => read(wide) === read(narrow));
 
-      check('壳那条规则真的执行了（顶栏与「接着上次」那一行在窄档允许换行）',
-        wide.topbarWrap === 'nowrap' && narrow.topbarWrap === 'wrap'
+      check('壳那条规则真的执行了（顶栏在窄档分行，「接着上次」允许换行）',
+        wide.topbarStacked === false && narrow.topbarStacked === true
         && wide.continueBarWrap === 'nowrap' && narrow.continueBarWrap === 'wrap',
-        `wide=${wide.topbarWrap}/${wide.continueBarWrap} narrow=${narrow.topbarWrap}/${narrow.continueBarWrap}`);
+        `wide=${wide.topbarStacked}/${wide.continueBarWrap} narrow=${narrow.topbarStacked}/${narrow.continueBarWrap}`);
       check('科目行那条规则真的执行了（换行，且右半截换到自己一行、占满一整行）',
         wide.courseWrap === 'nowrap' && narrow.courseWrap === 'wrap'
         && narrow.courseSide.y >= narrow.courseMain.y + narrow.courseMain.h - 1
@@ -1808,7 +1830,7 @@ try {
     await ctx.navigate(fixture, { settle: 1200 });
     const read = `(() => {
       const root = document.querySelector('.smb-root');
-      const picker = document.querySelector('.smb-select');
+      const picker = document.querySelector('.smb-motionpick .smb-select');
       return {
         attr: root.getAttribute('data-motion'),
         token: getComputedStyle(root).getPropertyValue('--smb-motion').trim(),
@@ -1818,7 +1840,7 @@ try {
     })()`;
     const pickLevel = async (level) => {
       await ctx.evaluate(`(() => {
-        const select = document.querySelector('.smb-select');
+        const select = document.querySelector('.smb-motionpick .smb-select');
         select.value = '${level}';
         select.dispatchEvent(new Event('change', { bubbles: true }));
       })()`);
@@ -1826,6 +1848,13 @@ try {
       return ctx.evaluate(read);
     };
     const ms = (token) => parseFloat(String(token)) * (/ms\s*$/.test(String(token)) ? 1 : 1000);
+
+    // 先把「系统偏好」显式模拟成 no-preference，再读 auto 档：`auto` 的取值按设计就跟随
+    // `prefers-reduced-motion`，而宿主的默认偏好不是常量——同一份代码在验证机 CUPC 的桌面
+    // 会话下，Edge 默认就报 `reduce`（auto 于是拿 70ms），在普通桌面上才是 `no-preference`
+    // （140ms）。不断言宿主默认，断言产品在给定偏好下的行为；reduce 那一支在下面单独模拟。
+    await session.emulate({ reducedMotion: 'no-preference' });
+    await ctx.sleep(200);
 
     const seen = { auto: await ctx.evaluate(read) };
     check('[动效] 四档齐全',

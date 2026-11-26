@@ -65,6 +65,17 @@ function stubReact() {
   const Fragment = Symbol('react.fragment');
   return {
     Fragment,
+    // 类组件的基类（#174 ② 的渲染边界要 `extends React.Component`）。Node 侧没有 DOM，
+    // 边界里的 `getDerivedStateFromError` / `componentDidCatch` 一次也跑不到——这里只为
+    // 「工厂能物化」与「`props.children` 读得到」两件事给一个最小同形物。
+    Component: class Component {
+      constructor(props) { this.props = props; this.state = this.state || {}; }
+
+      setState(patch) {
+        const next = typeof patch === 'function' ? patch(this.state, this.props) : patch;
+        this.state = Object.assign({}, this.state, next || {});
+      }
+    },
     // 与 React 同形：0 个孩子 → undefined，1 个 → 那个孩子本身，多个 → 数组。
     // 别图省事恒返回 children——`h('div', null, '一句话')` 是这里最常见的写法。
     createElement: (type, props, ...children) => ({
@@ -92,8 +103,8 @@ function stubReact() {
 let cached = null;
 
 /** 加载一次、缓存：每个套件进程里 client.js 只需要跑一遍工厂。 */
-export function loadClient() {
-  if (cached) return cached;
+export function loadClient(options) {
+  if (cached && options === undefined) return cached;
 
   const source = fs.readFileSync(CLIENT_FILE, 'utf8');
   const loaded = [];
@@ -124,9 +135,10 @@ export function loadClient() {
     throw new Error(`阅读端多要了一个模块：${name}（宿主只冻结 ${RUNTIME_MODULES.join(' / ')}）`);
   };
 
-  const plugin = entry.factory(requireStub);
-  cached = { id: entry.id, plugin, requested, source };
-  return cached;
+  const plugin = entry.factory(requireStub, options);
+  const result = { id: entry.id, plugin, requested, source };
+  if (options === undefined) cached = result;
+  return result;
 }
 
 /**
@@ -137,13 +149,13 @@ export function loadClient() {
  * 浏览器里没人设这个全局，所以那一步在真宿主里是空操作。
  * 回调用完立刻删掉，别给后续加载留痕。
  */
-export function clientInternals() {
+export function clientInternals(options) {
   const key = '__studymate_client_internals';
   const previous = globalThis[key];
   let internals = null;
   globalThis[key] = (value) => { internals = value; };
   try {
-    loadClient();
+    loadClient(options);
   } finally {
     if (previous === undefined) delete globalThis[key];
     else globalThis[key] = previous;

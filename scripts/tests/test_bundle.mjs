@@ -7,13 +7,30 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { parseYaml } from '../../lib/yaml.ts';
-import { validatePack } from '../release/release.mjs';
+import { packEntry, validatePack } from '../release/release.mjs';
+import { COPY_ALL } from './fixtures/copy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
 // 原生加载下引擎就是**已安装的包自身**——package.json 与 package.json 里 files 带的
 // scripts/、templates/、schemas/、docs/、preset/skills 都在这个目录里。
 const packageSkills = path.join(root, 'preset', 'skills').split(path.sep).join('/');
+
+/**
+ * 把宿主提供的 schemastery 连同它的依赖放进目标 node_modules。
+ *
+ * 插件入口是静态 `import z from '@deepseek-ai/schemastery'`（与 dsh-win-pwsh7 同一条：
+ * 宿主的模块解析只在加载期生效，运行期 dynamic import 拿不到）。这两个边界夹具里没有
+ * 宿主，所以按宿主的形状补出来；真实 profile 里这些包在宿主那一层。
+ */
+function provideHostSchema(target) {
+  for (const name of ['@deepseek-ai/schemastery', '@deepseek-ai/cosmokit', '@standard-schema/spec']) {
+    const from = path.join(root, 'node_modules', ...name.split('/'));
+    const to = path.join(target, 'node_modules', ...name.split('/'));
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.cpSync(from, to, COPY_ALL);
+  }
+}
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-bundle-'));
@@ -214,10 +231,22 @@ test('registry failures are reported without stopping the host or deleting learn
   assert.equal(fs.readFileSync(data, 'utf8'), 'my learning data');
 });
 
+test('public entry re-exports the plugin contract (inject / apply / Config)', async () => {
+  // 宿主读的是 package.json exports["."] 那个 `.mjs`，不是 `bin/dsh-plugin.ts`：
+  // Config 只写在 TS 里、入口忘了转出去，schema 就永远读不到（Config provider 报 absent）。
+  const entry = await import(pathToFileURL(path.join(root, 'bin', 'dsh-plugin.mjs')).href);
+  assert.deepEqual(entry.inject, ['agentPresets']);
+  assert.equal(typeof entry.apply, 'function');
+  assert.equal(typeof entry.Config, 'function', '入口没有转出 Config：插件页的配置表单不会出现');
+});
+
 test('an install-boundary failure is reported without stopping the host or creating installation files', t => {
   const f = fixture(t);
   const copied = path.join(f.dir, 'dsh-plugin.ts');
   fs.copyFileSync(path.join(root, 'bin/dsh-plugin.ts'), copied);
+  // schemastery 由宿主提供（`dsh-win-pwsh7` 同一条静态 import）：这里把宿主那份放进临时
+  // 目录，模拟「宿主在，但插件边界缺 lib/」；var 的 installPayload 桩照旧制造边界失败。
+  provideHostSchema(f.dir);
   // 把插件入口单独拷到一个没有 lib/ 的目录里：顶层静态 import 会让这条用例在解析期就崩，
   // 这里的桩模拟的是**安装器边界失败**（老宿主 / 缺依赖），插件该只警告、不建安装文件。
   fs.writeFileSync(path.join(f.dir, 'studymate.mjs'),
@@ -228,6 +257,41 @@ test('an install-boundary failure is reported without stopping the host or creat
   assert.equal(state.registered, 0);
   assert.match(state.warnings.join('\n'), /安装器边界失败/);
   assert.equal(fs.existsSync(f.dshHome), false);
+});
+
+test('启动失败的原因交给插件页状态卡，而不是只留一行 console.warn（#317）', t => {
+  const f = fixture(t);
+  // 连折行也救不回来的补丁：`- {` 一直没闭合。真实 installPayload 在解析这一步就失败，
+  // 与 #317 里那条 Windows 上报是同一个 catch——区别只是这里错误照旧可见。
+  fs.mkdirSync(path.dirname(f.patch), { recursive: true });
+  fs.writeFileSync(f.patch, 'plugins:\n  - {\n    id: broken\n', 'utf8');
+  const result = f.run(`import { apply } from ${JSON.stringify(plugin)};
+    const state = {warnings: [], handlers: {}};
+    console.warn = message => state.warnings.push(String(message));
+    const ctx = {
+      get: () => ({name: 'web', home: process.env.DSH_HOME}),
+      agentPresets: {register: async () => {}},
+      effect: async fn => {await fn();},
+      inject: (names, handler) => handler({
+        connection: {fetch: {register: route => {state.handlers[route.path] = route.fetch; return () => {};}}},
+        effect: fn => fn(),
+      }),
+    };
+    await apply(ctx);
+    // 状态路由是浮动 Promise 挂上去的（lib/ 动态 import），等它落位再问。
+    for (let i = 0; i < 100 && !state.handlers['/api/studymate/status']; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const response = await state.handlers['/api/studymate/status'](new Request('http://x/api/studymate/status'));
+    state.status = await response.json();
+    console.log(JSON.stringify(state));`);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const state = JSON.parse(result.stdout);
+  assert.ok(state.warnings.some(warning => /已跳过原生加载/.test(warning)), JSON.stringify(state.warnings));
+  assert.equal(state.status.ok, true);
+  assert.equal(state.status.registration.ok, false);
+  assert.match(state.status.registration.error, /cordis\.patch\.yml/);
+  assert.match(state.status.registration.error, /缺少闭合/);
 });
 
 test('an old host skips unsupported native loading without blocking startup', async () => {
@@ -267,10 +331,14 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
   const packed = passed(npm(['pack', '--ignore-scripts', '--offline', '--json', '--pack-destination', packs], root));
   // 这份就是发布件：Release 的发放白名单（validatePack）必须认它。#155 之前门禁里没人问过
   // 这一句——README.en.md 不在 files 里、npm 却一定会打进去，于是门禁全绿、发布卡死。
-  validatePack(JSON.parse(packed.stdout)[0]);
-  const archive = path.join(packs, JSON.parse(packed.stdout)[0].filename);
+  // 取哪一项交给 packEntry：npm 12 起 `pack --json` 是对象而不是数组（#250）。
+  const pack = packEntry(packed.stdout);
+  validatePack(pack);
+  const archive = path.join(packs, pack.filename);
   passed(npm(['install', archive, '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false'], consumer));
   const installed = path.join(consumer, 'node_modules', '@yunmiao', 'studymate');
+  // 同样的道理：schemastery 由宿主提供，消费者目录里补一份（真实 profile 里它在宿主那一层）。
+  provideHostSchema(consumer);
   // 必须是 npm 解出来的真实 node_modules 路径；源码检出与 npm link 都复现不了这次故障。
   assert.equal(fs.lstatSync(installed).isSymbolicLink(), false);
   const version = JSON.parse(fs.readFileSync(path.join(installed, 'package.json'), 'utf8')).version;
@@ -285,8 +353,9 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
   fs.writeFileSync(path.join(foreign, 'index.ts'), 'export const marker: number = 1;\n');
   run(['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
-    import { inject, apply } from '@yunmiao/studymate';
+    import { inject, apply, Config } from '@yunmiao/studymate';
     assert.deepEqual(inject, ['agentPresets']);
+    assert.equal(typeof Config, 'function', '打包件的入口没有转出 Config');
     const configs = [], effects = [], warnings = [];
     console.warn = message => warnings.push(String(message));
     let disposed = 0;
