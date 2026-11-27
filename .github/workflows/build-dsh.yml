@@ -1,0 +1,75 @@
+name: Build DSH package
+
+# 构筑可直接装进 DeepSeek Harness (DSH) 的 StudyMate 发行包：
+#   - npm tarball（exports["./client"]=dist/client.js，即 dsh plugin / pnpm 能装的形态）
+#   - Codex / ChatGPT Work 用的插件 ZIP（studymate-openai.zip）
+# 两个产物同时作为 Actions artifact 上传，并附到本仓库的 GitHub Release。
+# 手动触发：Actions -> Build DSH package -> Run workflow，或 gh workflow run build-dsh.yml
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create (optional; default dsh-build-<version>-<shortsha>)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-dsh
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build installable StudyMate package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Build client bundle (dist/client.js)
+        run: npm run build:client
+      - name: Build plugin ZIP
+        run: mkdir -p out && node bin/studymate.mjs build-plugin --output "$PWD/out"
+      - name: Pack npm tarball (DSH-installable)
+        run: mkdir -p out && npm pack --ignore-scripts --pack-destination "$PWD/out"
+      - name: Verify packed contents include client entry
+        run: |
+          set -euo pipefail
+          TGZ=$(ls out/*.tgz)
+          echo "Tarball: $TGZ"
+          tar -tzf "$TGZ" | grep -qx package/dist/client.js
+          tar -tzf "$TGZ" | grep -qx package/cordis.patch.yml
+          echo "OK: client entry and patch present"
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          ls -la out
+          echo "VERSION=$(jq -r .version package.json)" >> "$GITHUB_ENV"
+          echo "SHORTSHA=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: studymate-dsh-${{ env.VERSION }}-${{ env.SHORTSHA }}
+          path: out/*
+          if-no-files-found: error
+      - name: Create or update fork Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          if [ -z "${TAG}" ]; then TAG="dsh-build-${VERSION}-${SHORTSHA}"; fi
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          NOTES="StudyMate ${VERSION} DSH build from commit ${GITHUB_SHA} ref ${GITHUB_REF_NAME}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then gh release upload "${TAG}" out/*.tgz out/*.zip --clobber; else gh release create "${TAG}" out/*.tgz out/*.zip --title "StudyMate ${VERSION} DSH build ${SHORTSHA}" --target "${GITHUB_SHA}" --notes "${NOTES}"; fi
