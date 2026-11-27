@@ -48,8 +48,9 @@ jobs:
           set -euo pipefail
           TGZ=$(ls out/*.tgz)
           echo "Tarball: $TGZ"
-          tar -tzf "$TGZ" | grep -qx package/dist/client.js
-          tar -tzf "$TGZ" | grep -qx package/cordis.patch.yml
+          tar -tzf "$TGZ" > /tmp/packlist.txt
+          grep -qx 'package/dist/client.js' /tmp/packlist.txt
+          grep -qx 'package/cordis.patch.yml' /tmp/packlist.txt
           echo "OK: client entry and patch present"
       - name: Collect artifacts
         run: |
