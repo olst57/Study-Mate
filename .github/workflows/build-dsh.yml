@@ -82,9 +82,10 @@ jobs:
       - name: Create or update fork Release
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.tag }}"
+          TAG="${INPUT_TAG}"
           if [ -z "${TAG}" ]; then TAG="dsh-build-${VERSION}-${SHORTSHA}"; fi
           # v* 是正式发布的命名空间，fork 构建不得占用（否则会与上游 tag 冲突，
           # 也会把首页 Latest 指向一个测试包）。
