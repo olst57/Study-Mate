@@ -5,12 +5,15 @@ name: Build DSH package
 #   - Codex / ChatGPT Work 用的插件 ZIP（studymate-openai.zip）
 # 两个产物同时作为 Actions artifact 上传，并附到本仓库的 GitHub Release。
 # 手动触发：Actions -> Build DSH package -> Run workflow，或 gh workflow run build-dsh.yml
+#
+# 这是 **fork 自用构建**，不是正式发布：正式发布走 release.yml（仅上游仓库、main 分支）。
+# 因此这里的 Release 一律打 --prerelease 且 --latest=false，避免抢占仓库首页的 Latest。
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to create (optional; default dsh-build-<version>-<shortsha>)
+        description: Release tag to create (optional; default dsh-build-<version>-<shortsha>; v* is rejected)
         required: false
         type: string
 
@@ -22,8 +25,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 打包发布前的测试门禁：复用 CI 同一条 npm test（Ubuntu / Node 24），
+  # 没过测试就不允许产出可发布的包。
+  checks:
+    name: Test gate (npm test)
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build installable StudyMate package
+    needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -43,15 +53,20 @@ jobs:
         run: mkdir -p out && node bin/studymate.mjs build-plugin --output "$PWD/out"
       - name: Pack npm tarball (DSH-installable)
         run: mkdir -p out && npm pack --ignore-scripts --pack-destination "$PWD/out"
-      - name: Verify packed contents include client entry
+      # 产物清单必须完整：缺 dist/client.notes.js 时切到无界笔记会失败，
+      # 缺 dist/client-notices.txt 或空 ZIP 则是发布物静默残缺。
+      - name: Verify packed contents
         run: |
           set -euo pipefail
           TGZ=$(ls out/*.tgz)
           echo "Tarball: $TGZ"
           tar -tzf "$TGZ" > /tmp/packlist.txt
           grep -qx 'package/dist/client.js' /tmp/packlist.txt
+          grep -qx 'package/dist/client.notes.js' /tmp/packlist.txt
+          grep -qx 'package/dist/client-notices.txt' /tmp/packlist.txt
           grep -qx 'package/cordis.patch.yml' /tmp/packlist.txt
-          echo "OK: client entry and patch present"
+          test -s out/studymate-openai.zip
+          echo "OK: client entry, notes chunk, notices, patch and plugin ZIP all present"
       - name: Collect artifacts
         run: |
           set -euo pipefail
@@ -71,6 +86,24 @@ jobs:
           set -euo pipefail
           TAG="${{ inputs.tag }}"
           if [ -z "${TAG}" ]; then TAG="dsh-build-${VERSION}-${SHORTSHA}"; fi
+          # v* 是正式发布的命名空间，fork 构建不得占用（否则会与上游 tag 冲突，
+          # 也会把首页 Latest 指向一个测试包）。
+          case "${TAG}" in
+            v[0-9]*)
+              echo "::error::Refusing tag '${TAG}': v* belongs to official releases. Use a dsh-build-* tag."
+              exit 1
+              ;;
+          esac
           echo "TAG=${TAG}" >> "$GITHUB_ENV"
           NOTES="StudyMate ${VERSION} DSH build from commit ${GITHUB_SHA} ref ${GITHUB_REF_NAME}"
-          if gh release view "${TAG}" >/dev/null 2>&1; then gh release upload "${TAG}" out/*.tgz out/*.zip --clobber; else gh release create "${TAG}" out/*.tgz out/*.zip --title "StudyMate ${VERSION} DSH build ${SHORTSHA}" --target "${GITHUB_SHA}" --notes "${NOTES}"; fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" out/*.tgz out/*.zip --clobber
+            # 旧版本工作流建出的 Release 可能占着 Latest，重建时一并纠正。
+            gh release edit "${TAG}" --prerelease --latest=false
+          else
+            gh release create "${TAG}" out/*.tgz out/*.zip \
+              --title "StudyMate ${VERSION} DSH build ${SHORTSHA}" \
+              --target "${GITHUB_SHA}" \
+              --notes "${NOTES}" \
+              --prerelease --latest=false
+          fi
